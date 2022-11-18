@@ -3,26 +3,36 @@ def COLOR_MAP = [
     'FAILURE': 'danger',
 ]
 pipeline {
-  agent any
-  environment {
-    WORKSPACE = "${env.WORKSPACE}"
-  }
-  tools {
-    maven 'localMaven'
-    jdk 'localJdk'
-  }
-  stages {
-    stage('Build') {
-      steps {
-        sh 'mvn clean package'
-      }
-      post {
-        success {
-          echo ' now Archiving '
-          archiveArtifacts artifacts: '**/*.war'
-        }
-      }
+    agent any
+    environment{
+        WORKSPACE = "${env.WORKSPACE}"
     }
+    tools{
+        maven 'localMaven'
+        jdk 'localJdk'
+    }
+    stages {
+        stage('Git checkout') {
+            steps {
+                echo 'Cloning the application code...'
+                git branch: 'main', url: 'https://github.com/mariusforreal/Jenkins-CI-CD-Pipeline-Project.git'
+                sh 'mvn --version'
+                echo "${WORKSPACE}"
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                sh 'java -version'
+                sh 'mvn clean package'
+            }
+            post {
+                success {
+                    echo 'archiving....'
+                    archiveArtifacts artifacts: '**/*.war', followSymlinks: false
+                }
+            }
+        }
     stage('Unit Test'){
         steps {
             sh 'mvn test'
@@ -43,18 +53,25 @@ pipeline {
             }
         }
     }
-    stage('SonarQube Scan') {
-      steps {
-        sh """mvn sonar:sonar \
-              -Dsonar.projectKey=JavaWebApp \
-              -Dsonar.host.url=http://172.31.89.205:9000 \
-              -Dsonar.login=7b1c31d43d7398c57705291d4dd5e32750e80e03"""
-      }
+    stage ('SonarQube scanning'){
+        steps {
+            withSonarQubeEnv('SonarQube') {
+                sh """mvn sonar:sonar \
+                     -Dsonar.projectKey=JavaWebApp \
+                     -Dsonar.host.url=http://172.31.89.205:9000 \
+                     -Dsonar.login=7b1c31d43d7398c57705291d4dd5e32750e80e03"""
+            }
+        }
     }
-    stage('Upload to Artifactory') {
-      steps {
-        sh "mvn clean deploy -DskipTests"
-      }
+    stage("Quality Gate"){
+      steps{
+       waitForQualityGate abortPipeline: true
+         }
+    }
+    stage("Upload Artifacts to Nexus"){
+      steps{
+       sh 'mvn clean deploy -DskipTests'
+         }
     }
     stage('Deploy to DEV') {
       environment {
@@ -64,7 +81,7 @@ pipeline {
         sh "ansible-playbook ${WORKSPACE}/deploy.yaml --extra-vars \"hosts=$HOSTS workspace_path=$WORKSPACE\""
       }
      }
-    // stage('Approval for stage') {
+     // stage('Approval for stage') {
     //   steps {
     //     input('Do you want to proceed?')
     //   }
@@ -94,11 +111,12 @@ pipeline {
   post {
     always {
         echo 'Slack Notifications.'
-        slackSend channel: '#mbandi-jenkins-cicd-pipeline-alerts', //update and provide your channel name
+        slackSend channel: '#glorious-w-f-devops-alerts', //update and provide your channel name
         color: COLOR_MAP[currentBuild.currentResult],
         message: "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} build ${env.BUILD_NUMBER} \n More info at: ${env.BUILD_URL}"
     }
   }
 }
 
-//slackSend channel: '#mbandi-cloudformation-cicd', message: "Please find the pipeline status of the following ${env.JOB_NAME ${env.BUILD_NUMBER} ${env.BUILD_URL}"
+//slackSend channel: '#glorious-w-f-devops-alerts', message: "Please find the pipeline status of the following ${env.JOB_NAME ${env.BUILD_NUMBER} ${env.BUILD_URL}"
+     
